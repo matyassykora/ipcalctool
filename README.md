@@ -6,6 +6,8 @@
 
 A C++ program that helps you subnet a network
 
+![example](example.png)
+
 ## Installation
 
 compile with gcc

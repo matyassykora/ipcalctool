@@ -6,7 +6,7 @@
 
 A C++ program that helps you subnet a network
 
-![example#1](example.png)
+![example-img](example-img.png)
 
 ## Installation
 

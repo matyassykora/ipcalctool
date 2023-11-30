@@ -1,9 +1,8 @@
-#include <algorithm>
+#include "CppClip.hpp"
 #include <bitset>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
-#include <string>
 #include <vector>
 
 bool COLORED = false;
@@ -49,50 +48,6 @@ std::ostream &operator<<(std::ostream &os, ANSICode code) {
 
 } // namespace Color
 
-void printHelp(const std::string &message = "") {
-  if (!message.empty()) {
-    std::cout << message << '\n';
-  }
-  std::cout << "Usage: ipcalc -a <ip address> -m [/prefix] -s [/prefix] "
-               "{options}\n\n"
-            << "Options:\n"
-            << "  -c\tDisplay colored output.\n"
-            << "  -h\tPrint this help.\n\n"
-            << "Example inputs:\n"
-            << "  ipcalc -a 192.168.0.1 -m /24 -c\n"
-            << "  ipcalc -a 192.168.0.1 -m /17 -s /19\n"
-            << std::endl;
-}
-
-class parseInput {
-public:
-  parseInput(int argc, char *argv[]) {
-    for (int i = 0; i < argc; i++) {
-      this->args.push_back(std::string(argv[i]));
-    }
-  }
-
-  bool optionExists(const std::string &option) {
-    return std::find(this->args.begin(), this->args.end(), option) !=
-           this->args.end();
-  }
-
-  const std::string &getOption(const std::string &option) {
-    std::vector<std::string>::const_iterator iter;
-    iter = std::find(this->args.begin(), this->args.end(), option);
-
-    if (iter != this->args.end() && ++iter != this->args.end()) {
-      return *iter;
-    }
-
-    static const std::string empty = "";
-    return empty;
-  }
-
-private:
-  std::vector<std::string> args;
-};
-
 class IPv4Address {
 public:
   IPv4Address(){};
@@ -119,7 +74,7 @@ public:
     int subnetCount = getSubnetCount(prefix, subnetPrefix);
 
     if (subnetPrefix <= prefix) {
-      printHelp("Subnet prefix must be larger than the prefix!");
+      std::cerr << "Subnet prefix must be larger than the prefix!\n";
       exit(1);
     }
 
@@ -242,35 +197,38 @@ private:
 };
 
 int main(int argc, char *argv[]) {
-  parseInput input(argc, argv);
   IPv4Address ip;
+  ArgumentParser ipcalctool("ipcalctool");
+  ipcalctool.add("subnet").help("A subnet mask in '/xx' format");
+  ipcalctool.add("mask").help("A mask in '/xx' format");
+  ipcalctool.add("address").help("An IPv4 address");
+  ipcalctool.add("-c", "--colored").help("Color output stream");
+  ipcalctool.add("-h", "--help").help("Display help");
+  ipcalctool.addEpilogue("Example inputs:\n"
+                         "  ipcalctool 192.168.0.1 /24 /25 -c\n"
+                         "  ipcalctool 192.168.0.1 /17 /19");
+  ipcalctool.parse(argc, argv);
 
-  if (input.optionExists("-h") || input.optionExists("--help")) {
-    printHelp();
+  if (ipcalctool.isSet("-h") || ipcalctool.argsEmpty()) {
+    ipcalctool.printHelp();
     exit(0);
   }
 
-  if (input.optionExists("-c")) {
+  if (ipcalctool.isSet("-c")) {
     COLORED = true;
   }
 
-  const std::string &address = input.getOption("-a");
-  const std::string &mask = input.getOption("-m");
-  const std::string &subnetMask = input.getOption("-s");
+  const std::vector<std::string> &address = ipcalctool.getPositional("address");
+  const std::vector<std::string> &mask = ipcalctool.getPositional("mask");
+  const std::vector<std::string> &subnetMask =
+      ipcalctool.getPositional("subnet");
 
-  if (address.empty()) {
-    printHelp("No IP address provided!");
-    exit(1);
-  }
-
-  if (mask.empty()) {
-    printHelp("No mask provided!");
-    exit(1);
+  for (const std::string &s : address) {
   }
 
   if (!subnetMask.empty()) {
-    ip.processSubnets(address, mask, subnetMask);
+    ip.processSubnets(address.at(0), mask.at(0), subnetMask.at(0));
   } else {
-    ip.processIPv4(address, mask);
+    ip.processIPv4(address.at(0), mask.at(0));
   }
 }

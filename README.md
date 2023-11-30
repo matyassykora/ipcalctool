@@ -18,6 +18,10 @@ g++ main.cpp -o ipcalctool
 
 ## Usage example
 
+```sh
+ipcalctool 192.168.0.0 /16 /18
+```
+
 ### To get help with commandline arguments
 
 ```sh
@@ -28,24 +32,4 @@ or
 
 ```sh
 ipcalctool --help
-```
-
-### Using commandline arguments
-
-set an address with "-a"
-
-```sh
-ipcalctool -a 192.168.0.0
-```
-
-set a netmask with "-m"
-
-```sh
-ipcalctool -m /24
-```
-
-set a subnet netmask with "-s"
-
-```sh
-ipcalctool -s /26
 ```

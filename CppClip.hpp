@@ -1,103 +1,164 @@
 #pragma once
+
 #include <algorithm>
+#include <exception>
 #include <iomanip>
 #include <iostream>
+#include <map>
+#include <ranges>
 #include <sstream>
 #include <string>
-#include <unordered_map>
+#include <string_view>
 #include <vector>
+
+namespace CppClip {
+
+class Exception : public std::exception {
+public:
+  explicit Exception(std::string_view message) : m_message(message) {}
+
+  [[nodiscard]] auto what() const noexcept -> const char * override {
+    return m_message.c_str();
+  }
+
+private:
+  std::string m_message;
+};
+
+struct Argument {
+  std::string shortOpt;
+  std::string longOpt;
+  std::string positionalOpt;
+  std::string helpMessage;
+  int nargs = 0;
+  bool isSet = false;
+  bool isPositional = false;
+  bool isOptional = true;
+};
 
 class ArgumentParser {
 public:
-  ~ArgumentParser() = default;
-  ArgumentParser(const std::string &programName) {
-    this->programName = programName;
-  };
+  ArgumentParser(std::string_view programName) : programName(programName){};
 
-  // FIX: needing to add arguments in reverse?
-  ArgumentParser &add(const std::string &option,
-                      const std::string &longOpt = "") {
-    id++;
+  auto add(const std::string &option, const std::string &longOpt = "")
+      -> ArgumentParser & {
 
-    // positional
-    if (option.at(0) != '-') {
-      a[id].positionalOpt = option;
-      a[id].isPositional = true;
-      a[id].nargs = 1;
-      return *this;
+    if (option.empty()) {
+      throw Exception("You must add at least one argument");
     }
 
-    // only long
-    if (option.find("--") != std::string::npos) {
-      a[id].longOpt = option;
+    this->currentOption = option;
+
+    Argument arg;
+    argumentMap.try_emplace(option, arg);
+    Argument &argument = argumentMap.at(option);
+
+    if (isPositionalOpt(option)) {
+      if (!longOpt.empty()) {
+        throw Exception("When setting a positional option, the second option "
+                        "must not be set");
+      }
+      argument.positionalOpt = option;
+      argument.isPositional = true;
+      argument.nargs = 1;
       return *this;
     }
 
     // both long and short
     if (!longOpt.empty()) {
-      a[id].shortOpt = option;
-      a[id].longOpt = longOpt;
+      if (longOpt.find("--") == std::string::npos) {
+        throw Exception("Long option must start with --");
+      }
+      if (option.find("--") != std::string::npos) {
+        throw Exception("When setting both options, the first option must not "
+                        "start with --");
+      }
+      argument.shortOpt = option;
+      argument.longOpt = longOpt;
+      return *this;
+    }
+
+    // only long
+    if (option.find("--") != std::string::npos) {
+      argument.longOpt = option;
       return *this;
     }
 
     // only short
     if (!option.empty()) {
-      a[id].shortOpt = option;
+      argument.shortOpt = option;
+      return *this;
     }
 
+    throw Exception("Something went wrong when adding an argument");
+  }
+
+  auto help(const std::string &message) -> ArgumentParser & {
+    if (message.empty()) {
+      return *this;
+    }
+    argumentMap.at(currentOption).helpMessage = message;
     return *this;
   }
 
-  ArgumentParser &help(const std::string &message) {
-    a[id].helpMessage = message;
+  auto nargs(const int &nargs) -> ArgumentParser & {
+    if (nargs <= 0) {
+      throw Exception("Number of arguments must be >0");
+    }
+    auto &arg = argumentMap.at(currentOption);
+    arg.nargs = nargs;
+    arg.isPositional = true;
+    arg.isOptional = false;
     return *this;
   }
 
-  ArgumentParser &nargs(int nargs) {
-    a[id].nargs = nargs;
-    a[id].isPositional = true;
-    return *this;
+  static auto isPositionalOpt(std::string_view option) -> bool {
+    return option.at(0) != '-';
   }
 
-  void addDescription(const std::string &description) {
-    this->description = description;
+  void addDescription(std::string_view description) {
+    if (description.empty()) {
+      return;
+    }
+    this->programDescription = description;
   }
 
-  void addEpilogue(const std::string &epilogue) { this->epilogue = epilogue; }
+  void addEpilogue(std::string_view epilogue) {
+    this->programEpilogue = epilogue;
+  }
 
-  void parse(const int &argc, char *argv[]) {
+  void parse(const int &argc, char **argv) {
     for (int i = 1; i < argc; i++) {
-      this->args.push_back(std::string(argv[i]));
+      this->args.emplace_back(argv[i]);
     }
-    for (const auto &arg : args) {
-      for (const char &c : arg) {
-        for (auto &pair : a) {
-          if (pair.second.shortOpt.size() <= 1) {
-            continue;
-          }
-          if (pair.second.shortOpt.at(1) == c) {
-            pair.second.isSet = true;
-          }
-        }
+
+    for (const auto &arg : this->args) {
+      if (arg.find("--") != std::string::npos) {
+        checkUnrecognized(arg);
+        findLong(arg);
+        continue;
       }
+      parseShort(arg);
     }
   }
 
-  std::vector<std::string> getPositional(const std::string &option) {
+  auto getPositional(std::string_view option)
+      -> std::vector<std::string> {
     std::vector<std::string> vec;
     std::vector<std::string> all = getAllPositional();
-    for (auto i : a) {
-      if (!i.second.isPositional) {
+    for (const auto &[key, opt] : argumentMap) {
+      if (!opt.isPositional) {
         continue;
       }
-      if (option != i.second.positionalOpt) {
+      if (option != opt.positionalOpt) {
         continue;
       }
-      for (int j = 0; j < i.second.nargs; j++) {
-        if (positionalIndex >= all.size()) {
-          std::cout << "Not enough arguments to \"" << i.second.positionalOpt
-                    << "\"!\n";
-          exit(1);
+      for (int j = 0; j < opt.nargs; j++) {
+        if (positionalIndex >= all.size() && opt.isOptional) {
+          continue;
+        }
+        if (positionalIndex >= all.size() && !opt.isOptional) {
+          throw Exception("Not enough arguments to " + opt.positionalOpt);
         }
         vec.push_back(all.at(positionalIndex));
         positionalIndex++;
@@ -107,151 +168,200 @@ public:
     return vec;
   }
 
-  bool isSet(std::string option) {
-    for (auto pair : a) {
-      if (option.size() != pair.second.shortOpt.size()) {
-        continue;
-      }
-      if (option == pair.second.shortOpt && pair.second.isSet) {
-        return true;
-      }
-    }
-    return false;
+  auto existsInMap(std::string_view option) -> bool {
+    return std::any_of(
+        argumentMap.begin(), argumentMap.end(), [&](const auto &pair) {
+          return option == pair.second.shortOpt ||
+                 option == pair.second.longOpt ||
+                 option == pair.second.positionalOpt || pair.first == option;
+        });
   }
 
-  void printHelp() {
+  auto isSet(std::string_view option) -> bool {
+    auto iter = std::find_if(
+        argumentMap.begin(), argumentMap.end(), [&](const auto &pair) {
+          return option.size() == pair.second.shortOpt.size() &&
+                 option == pair.second.shortOpt && pair.second.isSet;
+        });
+    return iter != argumentMap.end();
+  }
+
+  void printHelp(bool expl = true) {
     std::cout << "Usage: " << programName << " ";
-
-    // print short options
-    for (auto i : a) {
-      if (i.second.shortOpt.empty()) {
-        continue;
-      }
-      std::cout << "[" << i.second.shortOpt << "] ";
+    if (expl) {
+      printShortOptions();
+      printLongOptions();
+      printPositionalOptions();
+    } else {
+      std::cout << "[OPTION]... [ARGUMENT]...";
     }
-
-    // print long options
-    for (auto i : a) {
-      if (i.second.shortOpt.empty() && !i.second.longOpt.empty()) {
-        std::cout << "[" << i.second.longOpt << "] ";
-      }
-    }
-
-    // print positional options
-    for (auto i : a) {
-      if (i.second.positionalOpt.empty()) {
-        continue;
-      }
-      std::cout << i.second.positionalOpt << " ";
-    }
-
     std::cout << '\n';
 
-    if (!this->description.empty()) {
-      std::cout << "\n" << description << "\n";
-    }
+    printProgramDescription();
 
     std::cout << "\nOptions:\n";
-    for (const auto &i : a) {
-      std::stringstream optionStream;
-      std::stringstream helpStream;
-      optionStream << "  " << i.second.shortOpt;
-      if (!i.second.longOpt.empty()) {
-        optionStream << ", " << i.second.longOpt;
-      }
-
-        if (i.second.isPositional) {
-          continue;
-        }
-        std::cout << std::setw(30) << std::left << optionStream.str()
-                  << std::right << i.second.helpMessage << "\n";
-    }
+    printOptions();
 
     std::cout << "\nPositional arguments:\n";
-    for (const auto &i : a) {
-      std::stringstream positional;
-      if (!i.second.isPositional) {
+    printPositionalArguments();
+
+    printProgramEpilogue();
+  }
+
+  void printShortOptions() {
+    if (argumentMap.empty()) {
+      return;
+    }
+    std::cout << "[-";
+    for (const auto &[key, opt] : argumentMap) {
+      if (opt.shortOpt.empty()) {
         continue;
       }
-      positional << "  " << i.second.positionalOpt << " (" << i.second.nargs
-                 << ')';
-      std::cout << std::setw(30) << std::left << positional.str() << std::right
-                << i.second.helpMessage << "\n";
+      for (const char &c : opt.shortOpt) {
+        if (c == '-') {
+          continue;
+        }
+        std::cout << c;
+      }
     }
+    std::cout << "] ";
+  }
 
-    if (!this->epilogue.empty()) {
-      std::cout << '\n' << this->epilogue << "\n";
+  void printLongOptions() {
+    for (const auto &[key, opt] : argumentMap) {
+      if (opt.shortOpt.empty() && !opt.longOpt.empty()) {
+        std::cout << "[" << opt.longOpt << "] ";
+      }
     }
   }
 
-  bool argsEmpty() { return args.size() == 0; }
-
-  // TODO: make sure arguments get correctly consumed after running this
-  std::vector<std::string> getArgsAfter(const std::string &option) {
-    std::vector<std::string> vec;
-    std::vector<std::string>::const_iterator itr;
-    int id = mapIDFromArg(option);
-    const auto &map = a[id];
-    int nargs = map.nargs;
-    if (id == -1) {
-      std::cout << "These arguments don't exist!\n";
-      exit(1);
+  void printPositionalOptions() {
+    for (const auto &[key, opt] : argumentMap) {
+      if (opt.positionalOpt.empty()) {
+        continue;
+      }
+      if (opt.isOptional) {
+        std::cout << "[" << opt.positionalOpt << "] ";
+        continue;
+      }
+      std::cout << opt.positionalOpt << " ";
     }
-    itr = std::find(this->args.begin(), this->args.end(), option);
-    for (int i = 0; i < nargs; i++) {
-      if (itr != this->args.end() && ++itr != this->args.end()) {
-        vec.push_back(*itr);
+  }
+
+  void printProgramDescription() {
+    if (!this->programDescription.empty()) {
+      std::cout << '\n' << programDescription << '\n';
+    }
+  }
+
+  void printOptions() {
+    for (const auto &[key, opt] : argumentMap) {
+      std::stringstream optionStream;
+      std::stringstream helpStream;
+      optionStream << "  " << opt.shortOpt;
+      if (!opt.longOpt.empty()) {
+        optionStream << ", " << opt.longOpt;
+      }
+
+      if (opt.isPositional) {
+        continue;
+      }
+      std::cout << std::setw(FORMAT_WIDTH) << std::left << optionStream.str()
+                << std::right << opt.helpMessage << "\n";
+    }
+  }
+
+  void printPositionalArguments() {
+    for (const auto &[key, opt] : argumentMap) {
+      std::stringstream positional;
+      if (!opt.isPositional) {
+        continue;
+      }
+      if (opt.isOptional) {
+        positional << "  [" << opt.positionalOpt << "]";
+      } else {
+        positional << "  " << opt.positionalOpt;
+      }
+      positional << " (" << opt.nargs << ')';
+      std::cout << std::setw(FORMAT_WIDTH) << std::left << positional.str()
+                << std::right << opt.helpMessage << '\n';
+    }
+  }
+
+  void printProgramEpilogue() {
+    if (!this->programEpilogue.empty()) {
+      std::cout << '\n' << this->programEpilogue << '\n';
+    }
+  }
+
+  auto argsEmpty() -> bool { return args.empty(); }
+
+  auto getArgument(const std::string &option) -> Argument & {
+    return argumentMap.at(option);
+  }
+
+  void allowUnrecognized() { unrecognizedAllowed = true; }
+
+private:
+  auto getAllPositional() -> std::vector<std::string> {
+    std::vector<std::string> vec;
+    for (const auto &arg : args) {
+      if (arg.front() != '-') {
+        vec.push_back(arg);
       }
     }
     return vec;
   }
 
-private:
-  int mapIDFromArg(const std::string &j) {
-    int id = -1;
-
-    for (const std::pair<const int, argument> &i : a) {
-      const std::string &opts = i.second.shortOpt;
-      if (i.second.shortOpt == j) {
-        id = i.first;
-        return id;
+  void findLong(const std::string &arg) {
+    for (auto &[key, opt] : this->argumentMap) {
+      if (opt.longOpt == arg || key == arg) {
+        opt.isSet = true;
       }
     }
-
-    return id;
   }
 
-  std::vector<std::string> getAllPositional() {
-    std::vector<std::string> vec;
-    for (auto i : args) {
-      if (i[0] != '-') {
-        vec.push_back(i);
+  void parseShort(const std::string &arg) {
+    if (arg.front() != '-') {
+      return;
+    }
+    for (const char &c : arg) {
+      if (c != '-') {
+        checkUnrecognized(std::string(1, '-').append(1, c));
+      }
+      for (auto &[key, opt] : this->argumentMap) {
+        if (opt.shortOpt.size() <= 1) {
+          continue;
+        }
+        if (opt.shortOpt.at(1) == c) {
+          opt.isSet = true;
+        }
       }
     }
-    return vec;
   }
 
-private:
-  struct argument {
-    std::string shortOpt = "";
-    bool isSet = false;
-    std::string longOpt = "";
-    std::string positionalOpt = "";
-    std::vector<std::string> options;
-    std::string helpMessage = "";
-    bool isPositional = false;
-    int nargs = 0;
-    std::string metavar = "";
-    std::vector<std::string> data;
-  };
+  void checkUnrecognized(const std::string &arg) {
+    if (!existsInMap(arg)) {
+      this->unrecognizedFound = true;
+    }
+    if (this->unrecognizedFound && !this->unrecognizedAllowed) {
+      throw Exception("Unrecognized option: " + arg);
+    }
+  }
 
-  int positionalIndex = 0;
+  static const int FORMAT_WIDTH = 30;
+
+  bool unrecognizedFound = false;
+  bool unrecognizedAllowed = false;
+  unsigned long positionalIndex = 0;
 
   std::vector<std::string> args;
-  std::string description = "";
-  std::string epilogue = "";
+  std::string programDescription;
+  std::string programEpilogue;
+
+  std::string currentOption;
 
   std::string programName;
-  int id = -1;
-  std::unordered_map<int, argument> a;
+  std::map<std::string, Argument> argumentMap;
 };
+} // namespace CppClip

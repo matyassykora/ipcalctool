@@ -175,8 +175,8 @@ public:
   }
 
   // 'type' is here to make the error feedback more useful to the user
-  static auto toNumber(const std::string &str,
-                       const std::string &type = "IP") -> unsigned int {
+  static auto toNumber(const std::string &str, const std::string &type = "IP")
+      -> unsigned int {
     unsigned int bytes[IPV4_BYTES] = {0};
 
     if (sscanf(str.c_str(), "%d.%d.%d.%d", &bytes[3], &bytes[2], &bytes[1],
@@ -245,8 +245,7 @@ public:
 
   static auto getSubnetCount(const int &prefix, const int &subnetPrefix)
       -> int {
-    int a = pow(2, IPV4_BITS - prefix) / pow(2, IPV4_BITS - subnetPrefix);
-    return a;
+    return pow(2, IPV4_BITS - prefix) / pow(2, IPV4_BITS - subnetPrefix);
   }
 
   auto printNetwork(const network &net) -> void {

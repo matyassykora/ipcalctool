@@ -20,7 +20,8 @@ g++ main.cpp -o ipcalctool
 ## Usage examples
 
 ```sh
-ipcalctool 192.168.0.0 /16 /18
+ipcalctool 192.168.0.0 /16
+ipcalctool 192.168.0.0 /16 -c
 ipcalctool 192.168.0.0 255.255.255.0 /26
 ```
 

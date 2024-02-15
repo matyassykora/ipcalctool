@@ -9,12 +9,6 @@
 #include <string_view>
 #include <vector>
 
-const int IPV4_BITS = 32;
-const int ONE_BYTE = 8;
-const int IPV4_BYTES = IPV4_BITS / ONE_BYTE;
-const int BYTE_MAX = 0xFF;
-const unsigned int BASE_MASK = 0xFFFFFFFF;
-
 namespace Color {
 enum ANSICode {
   FG_DEFAULT = 39,
@@ -49,11 +43,23 @@ enum ANSICode {
   BG_WHITE = 107,
 };
 
+/*
+ * a helper for coloring text with ANSI color codes
+ *
+ * example: std::cout << Color::FG_LIGHT_BLUE << "some text" <<
+ * Color::FG_DEFAULT;
+ */
 auto operator<<(std::ostream &os, ANSICode code) -> std::ostream & {
   return os << "\033[" << static_cast<int>(code) << "m";
 }
 
 } // namespace Color
+
+const int IPV4_BITS = 32;
+const int ONE_BYTE = 8;
+const int IPV4_BYTES = IPV4_BITS / ONE_BYTE;
+const int BYTE_MAX = 0xFF;
+const unsigned int BASE_MASK = 0xFFFFFFFF;
 
 class IPv4Address {
   bool COLORED = false;
@@ -80,14 +86,19 @@ class IPv4Address {
     unsigned int hostCount;
   };
 
+  enum class valueTypes {
+    MASK = 0,
+    IP_ADDRESS,
+  };
+
 public:
   IPv4Address() = default;
 
-  auto processIPv4(const std::string &address, const std::string &mask)
+  auto processIPv4(const std::string &address, const std::string &mask) const
       -> void {
     network net{};
     int prefix = toPrefix(mask);
-    unsigned int ip = toNumber(address);
+    unsigned int ip = toNumber(address, valueTypes::IP_ADDRESS);
     unsigned int netmask = toNetmask(prefix);
 
     assignNetwork(net, ip, netmask);
@@ -100,11 +111,11 @@ public:
 
   auto processIPv4WithSubnets(const std::string &address,
                               const std::string &mask,
-                              const std::string &subnetMask) -> void {
+                              const std::string &subnetMask) const -> void {
     std::vector<network> subnets;
     int prefix = toPrefix(mask);
-    unsigned int netmask = toNetmask(prefix);
     int subnetPrefix = toPrefix(subnetMask);
+    unsigned int subnetNetmask = toNetmask(subnetPrefix);
     int subnetCount = getSubnetCount(prefix, subnetPrefix);
 
     if (subnetPrefix <= prefix) {
@@ -113,21 +124,20 @@ public:
 
     processIPv4(address, mask);
 
-    std::cout << "\nSubnets after transition from " << mask << " to "
-              << subnetMask << "\n\n";
-    netmask = toNetmask(subnetPrefix);
-    printBytes("Netmask:", netmask);
+    std::cout << "\nSubnets after transition from /" << prefix << " to /"
+              << subnetPrefix << "\n\n";
+    printBytes("Netmask:", subnetNetmask);
     std::cout << "CIDR prefix:\t/" << subnetPrefix << '\n';
 
     for (int i = 0; i < subnetCount; i++) {
       network net{};
       unsigned int ip = 0;
       if (i == 0) {
-        ip = toNumber(address);
+        ip = toNumber(address, valueTypes::IP_ADDRESS);
       } else {
         ip = subnets[i - 1].broadcast + 1;
       }
-      assignNetwork(net, ip, netmask);
+      assignNetwork(net, ip, subnetNetmask);
       subnets.push_back(net);
     }
 
@@ -136,28 +146,28 @@ public:
 
   auto colorOutput(bool colored) -> void { this->COLORED = colored; }
 
-  static auto isContinuous(std::bitset<IPV4_BITS> bitset) -> bool {
-    for (int i = 0; i < IPV4_BITS; i++) {
-      if (bitset.test(i)) {
-        for (int j = i; j < IPV4_BITS - i; j++) {
-          if (!bitset.test(j)) {
-            return false;
-          }
-        }
-      }
+  static void validateMask(unsigned int mask, const std::string &maskString) {
+    // Only possible values are
+    // 1 if invalid
+    // 0 if valid
+    if (mask & (~mask >> 1)) {
+      throw Exception("Invalid mask: " + maskString);
     }
-    return true;
   }
 
-  static auto toPrefix(const std::string &cidr) -> int {
+  /*
+   * Return the prefix (the number of set bits) from a mask string in '/x' or
+   * 'x.x.x.x' format
+   *
+   * Throws if input is invalid
+   */
+  static auto toPrefix(const std::string &maskString) -> int {
     int prefix = 0;
     // check if the format is x.x.x.x
-    if (cidr.find('.') != std::string::npos) {
-      unsigned int mask = toNumber(cidr, "mask");
+    if (maskString.find('.') != std::string::npos) {
+      unsigned int mask = toNumber(maskString, valueTypes::MASK);
+      validateMask(mask, maskString);
       std::bitset<IPV4_BITS> bitset(mask);
-      if (!isContinuous(bitset)) {
-        throw Exception("The mask is non-continuous!");
-      }
       if (bitset.count() < 1 || bitset.count() > IPV4_BITS) {
         throw Exception("The mask must be <=32 and >0!");
       }
@@ -165,8 +175,9 @@ public:
     }
 
     // else assume the format is /x
-    if (sscanf(cidr.c_str(), "/%u", &prefix) != 1) {
-      throw Exception("Invalid mask: " + cidr);
+    // using sscanf for simplicity
+    if (sscanf(maskString.c_str(), "/%u", &prefix) != 1) {
+      throw Exception("Invalid mask: " + maskString);
     }
     if (prefix <= 0 || prefix > IPV4_BITS) {
       throw Exception("The mask must be <=32 and >0!");
@@ -174,19 +185,31 @@ public:
     return prefix;
   }
 
-  // 'type' is here to make the error feedback more useful to the user
-  static auto toNumber(const std::string &str, const std::string &type = "IP")
+  /**
+   * Convert a string in 'x.x.x.x' format to a number
+   *
+   * 'type' is here to make the error feedback more useful to the user
+   */
+  static auto toNumber(const std::string &str, const valueTypes &type)
       -> unsigned int {
     unsigned int bytes[IPV4_BYTES] = {0};
+    std::string valueType;
+    if (type == valueTypes::MASK) {
+      valueType = "mask";
+    }
+    if (type == valueTypes::IP_ADDRESS) {
+      valueType = "IP";
+    }
 
+    // using sscanf for simplicity
     if (sscanf(str.c_str(), "%d.%d.%d.%d", &bytes[3], &bytes[2], &bytes[1],
                &bytes[0]) != 4) {
-      throw Exception("Invalid " + type + " format: " + str);
+      throw Exception("Invalid " + valueType + " format: " + str);
     }
 
     for (auto byte : bytes) {
       if (byte < 0 || byte > BYTE_MAX) {
-        throw Exception(type + " bytes must be >= 0 and <= " +
+        throw Exception(valueType + " bytes must be >= 0 and <= " +
                         std::to_string(BYTE_MAX) + ": " + std::to_string(byte));
       }
     }
@@ -248,7 +271,7 @@ public:
     return pow(2, IPV4_BITS - prefix) / pow(2, IPV4_BITS - subnetPrefix);
   }
 
-  auto printNetwork(const network &net) -> void {
+  auto printNetwork(const network &net) const -> void {
     printBytes("Network:", net.network);
     printBytes("HostMin:", net.hostMin);
     printBytes("HostMax:", net.hostMax);
@@ -267,8 +290,8 @@ public:
     net.hostCount = net.broadcast - net.hostMin;
   }
 
-  auto printSubnets(const std::vector<network> &subnets) -> void {
-    for (int i = 0; i < subnets.size(); i++) {
+  auto printSubnets(const std::vector<network> &subnets) const -> void {
+    for (size_t i = 0; i < subnets.size(); i++) {
       std::cout << '\n' << i + 1 << ".\n";
       printNetwork(subnets[i]);
     }
@@ -278,14 +301,15 @@ public:
 auto main(int argc, char *argv[]) -> int {
   IPv4Address ip;
   CppClip::ArgumentParser ipcalctool("ipcalctool");
-  ipcalctool.add("subnet").help("A subnet mask in '/xx' format");
-  ipcalctool.add("mask").help("A mask in '/xx' format").nargs(1);
+  ipcalctool.add("subnet").help("A subnet mask in '/x' or 'x.x.x.x' format");
+  ipcalctool.add("mask").help("A mask in '/x' or 'x.x.x.x' format").nargs(1);
   ipcalctool.add("address").help("An IPv4 address").nargs(1);
   ipcalctool.add("-c", "--colored").help("Color output stream");
   ipcalctool.add("-h", "--help").help("Display help");
   ipcalctool.addEpilogue("Example inputs:\n"
+                         "  ipcalctool 192.168.0.1 /24 \n"
                          "  ipcalctool 192.168.0.1 /24 /25 -c\n"
-                         "  ipcalctool 192.168.0.1 /17 /19");
+                         "  ipcalctool 192.168.0.1 255.255.0.0 /17 ");
   try {
     ipcalctool.parse(argc, argv);
 

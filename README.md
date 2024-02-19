@@ -14,7 +14,7 @@ Uses [my cli parser](https://github.com/matyassykora/cppclip)
 compile with gcc
 
 ```sh
-g++ main.cpp -o ipcalctool
+g++ src/*.cpp -o ipcalctool
 ```
 
 ## Usage examples

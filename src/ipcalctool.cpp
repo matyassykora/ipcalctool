@@ -1,7 +1,6 @@
 #include "../include/ipcalctool.hpp"
 #include "../include/Color.hpp"
 #include "../include/IPv4Address.hpp"
-#include "../include/Network.hpp"
 
 #include <bitset>
 #include <iostream>

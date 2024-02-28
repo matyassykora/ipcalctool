@@ -1,5 +1,5 @@
 #include "../include/CppClip.hpp"
-#include "../include/IPv4Address.hpp"
+#include "../include/ipcalctool.hpp"
 
 #include <cstdlib>
 #include <exception>
@@ -8,7 +8,6 @@
 #include <vector>
 
 auto main(int argc, char *argv[]) -> int {
-  ipcalctool::IPv4Address ip;
   CppClip::ArgumentParser ipcalctool("ipcalctool");
   ipcalctool.add("subnet").help("A subnet mask in '/x' or 'x.x.x.x' format");
   ipcalctool.add("mask").help("A mask in '/x' or 'x.x.x.x' format").nargs(1);
@@ -27,8 +26,9 @@ auto main(int argc, char *argv[]) -> int {
       exit(0);
     }
 
+    bool coloredFlag = false;
     if (ipcalctool.isSet("-c")) {
-      ip.colorOutput(true);
+      coloredFlag = true;
     }
 
     const std::vector<std::string> &address =
@@ -37,12 +37,25 @@ auto main(int argc, char *argv[]) -> int {
     const std::vector<std::string> &subnetMask =
         ipcalctool.getPositional("subnet");
 
+    ipcalctool::IPv4Network net(address.at(0), mask.at(0));
+    net.print(coloredFlag, true);
+
     if (!subnetMask.empty()) {
-      ip.processIPv4WithSubnets(address.at(0), mask.at(0), subnetMask.at(0));
+      std::vector<ipcalctool::IPv4Network> subnets =
+          ipcalctool::calculateSubnets(address.at(0), mask.at(0),
+                                       subnetMask.at(0));
+
+      std::cout << "\nSubnets after transition from /" << net.cidrPrefix
+                << " to /" << subnets.at(0).cidrPrefix << "\n\n";
+      ipcalctool::printBytes("Netmask:", subnets.at(0).mask, coloredFlag);
+      std::cout << "CIDR prefix:\t/" << subnets.at(0).cidrPrefix << '\n';
+
+      for (int i = 0; i < subnets.size(); i++) {
+        std::cout << "\n" << i + 1 << ".\n";
+        subnets.at(i).print(coloredFlag);
+      }
       exit(0);
     }
-    ip.processIPv4(address.at(0), mask.at(0));
-
   } catch (const std::exception &e) {
     ipcalctool.printHelp();
     std::cerr << "\nError: " << e.what() << '\n';

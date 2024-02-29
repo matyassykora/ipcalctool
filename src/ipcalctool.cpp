@@ -62,18 +62,17 @@ void printBytes(const std::string &message, const unsigned int &thing,
 
 auto toNumber(const std::string &str) -> unsigned int {
   unsigned int bytes[IPV4_BYTES] = {0};
-  std::string valueType;
 
   // using sscanf for simplicity
   if (sscanf(str.c_str(), "%d.%d.%d.%d", &bytes[3], &bytes[2], &bytes[1],
              &bytes[0]) != 4) {
-    throw Exception("Invalid " + valueType + " format: " + str);
+    throw Exception("Invalid format: " + str);
   }
 
   for (auto byte : bytes) {
     if (byte < 0 || byte > BYTE_MAX) {
-      throw Exception(valueType + " bytes must be >= 0 and <= " +
-                      std::to_string(BYTE_MAX) + ": " + std::to_string(byte));
+      throw Exception("Octets must be >= 0 and <= " + std::to_string(BYTE_MAX) +
+                      ": " + std::to_string(byte));
     }
   }
 
@@ -98,7 +97,7 @@ auto toPrefix(const std::string &maskString) -> int {
     validateMask(mask, maskString);
     std::bitset<IPV4_BITS> bitset(mask);
     if (bitset.count() < 1 || bitset.count() > IPV4_BITS) {
-      throw Exception("The mask must be <=32 and >0!");
+      throw Exception("The mask must be <=32 and >0: " + maskString);
     }
     return bitset.count();
   }
@@ -109,7 +108,7 @@ auto toPrefix(const std::string &maskString) -> int {
     throw Exception("Invalid mask: " + maskString);
   }
   if (prefix <= 0 || prefix > IPV4_BITS) {
-    throw Exception("The mask must be <=32 and >0!");
+    throw Exception("The mask must be <=32 and >0: " + maskString);
   }
   return prefix;
 }
@@ -159,6 +158,10 @@ auto calculateSubnets(const std::string &ip, const std::string &netmask,
   int subnetCount = exp2(IPV4_BITS - prefix) / exp2(IPV4_BITS - subnetPrefix);
   uint32_t subneMaskInt = toNetmask(subnetPrefix);
 
+  if (prefix >= subnetPrefix) {
+    throw Exception("The prefix must be smaller than the subnet prefix!");
+  }
+
   for (int i = 0; i < subnetCount; i++) {
     uint32_t address = 0;
     IPv4Network subnet(ip, netmask);
@@ -172,6 +175,14 @@ auto calculateSubnets(const std::string &ip, const std::string &netmask,
     subnets.push_back(subnet);
   }
   return subnets;
+}
+
+void printSubnetTransitionInfo(IPv4Network &net, IPv4Network &subnet,
+                               bool colored) {
+  std::cout << "\nSubnets after transition from /" << net.cidrPrefix << " to /"
+            << subnet.cidrPrefix << "\n\n";
+  ipcalctool::printBytes("Netmask:", subnet.mask, colored);
+  std::cout << "CIDR prefix:\t/" << subnet.cidrPrefix << '\n';
 }
 
 }; // namespace ipcalctool

@@ -18,6 +18,7 @@ auto main(int argc, char *argv[]) -> int {
                          "  ipcalctool 192.168.0.1 /24 \n"
                          "  ipcalctool 192.168.0.1 /24 /25 -c\n"
                          "  ipcalctool 192.168.0.1 255.255.0.0 /17 ");
+
   try {
     ipcalctool.parse(argc, argv);
 
@@ -45,10 +46,7 @@ auto main(int argc, char *argv[]) -> int {
           ipcalctool::calculateSubnets(address.at(0), mask.at(0),
                                        subnetMask.at(0));
 
-      std::cout << "\nSubnets after transition from /" << net.cidrPrefix
-                << " to /" << subnets.at(0).cidrPrefix << "\n\n";
-      ipcalctool::printBytes("Netmask:", subnets.at(0).mask, coloredFlag);
-      std::cout << "CIDR prefix:\t/" << subnets.at(0).cidrPrefix << '\n';
+      ipcalctool::printSubnetTransitionInfo(net, subnets.at(0), coloredFlag);
 
       for (int i = 0; i < subnets.size(); i++) {
         std::cout << "\n" << i + 1 << ".\n";

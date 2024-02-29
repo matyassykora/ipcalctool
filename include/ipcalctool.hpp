@@ -51,4 +51,7 @@ auto calculateSubnets(const std::string &ip, const std::string &netmask,
                       const std::string &subnetMask)
     -> std::vector<IPv4Network>;
 
+void printSubnetTransitionInfo(IPv4Network &net, IPv4Network &subnet,
+                               bool colored);
+
 } // namespace ipcalctool
